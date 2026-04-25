@@ -1,0 +1,164 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.42.1.51946",
+      "templateHash": "14225621732896808525"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for the deployment script resource"
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {},
+      "metadata": {
+        "description": "Tags applied to the deployment script resource"
+      }
+    },
+    "uamiId": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource ID of the UAMI (from appgw-integration.bicep) that has Network Contributor on the App Gateway"
+      }
+    },
+    "appGatewayResourceGroup": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource group containing the App Gateway (e.g., \"DEVUAT-ASE-RG\")"
+      }
+    },
+    "appGatewayName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the App Gateway (e.g., \"DEVUAT-ASE-APPGWV2-03\")"
+      }
+    },
+    "appGatewayBackendPoolName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the backend pool to update (e.g., \"DEV-KRISPLUS-CHATGPT-POOL\")"
+      }
+    },
+    "containerAppPrivateFqdn": {
+      "type": "string",
+      "metadata": {
+        "description": "Private FQDN of the Container App: <containerAppName>.<managedEnvironmentDefaultDomain>"
+      }
+    },
+    "appGatewayHttpSettingsName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of the HTTP settings to upsert (e.g., \"DEV-KRISPLUS-CHATGPT-HTTPSetting\"). Leave empty to skip HTTP settings/listener/rule creation."
+      }
+    },
+    "appGatewayListenerName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of the HTTPS listener to upsert (e.g., \"DEV-KRISPLUS-CHATGPT-LISTENER\")"
+      }
+    },
+    "appGatewayRuleName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of the routing rule to upsert (e.g., \"DEV-KRISPLUS-CHATGPT-RULE\")"
+      }
+    },
+    "appGatewaySslCertName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of the existing SSL certificate on the App Gateway"
+      }
+    },
+    "appGatewayHostname": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Public hostname for the HTTPS listener (e.g., \"dev-chatgpt.nonprod-krispay.com\")"
+      }
+    },
+    "forceUpdateTag": {
+      "type": "string",
+      "defaultValue": "[utcNow()]",
+      "metadata": {
+        "description": "Forces re-execution on every azd provision. Defaults to current UTC time."
+      }
+    }
+  },
+  "variables": {
+    "$fxv#0": "#!/bin/bash\n# update-appgw-backend-pool.sh\n# Updates the Container App backend pool in an Azure Application Gateway.\n#\n# Called by appgw-backend-update.bicep via Microsoft.Resources/deploymentScripts.\n# Required env vars (injected by the deployment script resource):\n#   APPGW_RG             - Resource group containing the App Gateway\n#   APPGW_NAME           - App Gateway name (e.g. DEVUAT-ASE-APPGWV2-03)\n#   POOL_NAME            - Backend pool name (e.g. DEV-KRISPLUS-CHATGPT-POOL)\n#   PRIVATE_FQDN         - New FQDN: <containerAppName>.<managedEnvironmentDefaultDomain>\n#\n# Optional env vars (when set, the script also upserts probe, HTTP settings, listener, rule):\n#   HTTP_SETTINGS_NAME   - e.g. DEV-KRISPLUS-CHATGPT-HTTPSetting\n#   LISTENER_NAME        - e.g. DEV-KRISPLUS-CHATGPT-LISTENER\n#   RULE_NAME            - e.g. DEV-KRISPLUS-CHATGPT-RULE\n#   SSL_CERT_NAME        - existing cert on App Gateway (e.g. nonprodkrispaydotcom-sectigo-Expiry-2026)\n#   HOSTNAME             - public hostname (e.g. dev-chatgpt.nonprod-krispay.com)\n#\n# Implementation: manual GET → jq upsert → PUT via az rest\n#\n#   We do NOT use `az network application-gateway address-pool update` because that\n#   command does a full GET+PUT which re-validates ALL existing App Gateway configuration.\n#   If the App Gateway has any pre-existing misconfiguration (e.g. a custom error page\n#   with an invalid HTTP status code), ARM will reject the entire PUT with\n#   ApplicationGatewayCustomErrorStatusCodeIsInvalid — even though we are not touching\n#   that configuration at all.\n#\n#   The manual GET+jq+PUT approach strips invalid customErrorConfigurations (anything\n#   other than HttpStatus403 or HttpStatus502) from the body before PUT, allowing the\n#   update to proceed. This only removes already-broken configuration that Azure would\n#   have rejected on any write anyway.\n#\n# Retry rationale:\n#   The Managed Identity Operator / Network Contributor role assignments (granted by\n#   appgw-rbac.bicep so that this script's UAMI can pass the linked-authorization\n#   checks on the PUT) may not have propagated through Azure's authorization system\n#   by the time this script runs. Azure RBAC propagation typically completes in under\n#   2 minutes but can take up to 10. The retry loop handles this window without\n#   requiring manual re-runs.\n\nset -euo pipefail\n\nMAX_RETRIES=8\nRETRY_DELAY=30    # seconds between retry attempts (total ceiling: ~4 min)\nPOLL_INTERVAL=15  # seconds between provisioning state polls after PUT\nMAX_POLL=40       # maximum poll attempts after PUT (~10 minutes)\n\necho \"=== App Gateway backend pool update ===\"\necho \"  Resource group : ${APPGW_RG}\"\necho \"  App Gateway    : ${APPGW_NAME}\"\necho \"  Pool           : ${POOL_NAME}\"\necho \"  New FQDN       : ${PRIVATE_FQDN}\"\n\nENABLE_FULL_CONFIG=\"${HTTP_SETTINGS_NAME:+true}\"\nif [ \"${ENABLE_FULL_CONFIG}\" = \"true\" ]; then\n    echo \"  HTTP Settings  : ${HTTP_SETTINGS_NAME}\"\n    echo \"  Listener       : ${LISTENER_NAME}\"\n    echo \"  Rule           : ${RULE_NAME}\"\n    echo \"  SSL Cert       : ${SSL_CERT_NAME}\"\n    echo \"  Hostname       : ${HOSTNAME}\"\n    echo \"  Mode           : Full upsert (pool + probe + settings + listener + rule)\"\nelse\n    echo \"  Mode           : Pool-only upsert (no HTTP_SETTINGS_NAME set)\"\nfi\n\nSUBSCRIPTION_ID=$(az account show --query id -o tsv)\nAPI_VERSION=\"2023-05-01\"\nGATEWAY_URL=\"https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${APPGW_RG}/providers/Microsoft.Network/applicationGateways/${APPGW_NAME}?api-version=${API_VERSION}\"\n\n# Use temp files to avoid large variables and shell quoting issues with big JSON bodies\nTMPWORK=$(mktemp -d)\ntrap 'rm -rf \"${TMPWORK}\"' EXIT\nGATEWAY_FILE=\"${TMPWORK}/gateway.json\"\nMODIFIED_FILE=\"${TMPWORK}/modified.json\"\n\nfor attempt in $(seq 1 \"${MAX_RETRIES}\"); do\n    echo \"  Attempt ${attempt}/${MAX_RETRIES}...\"\n\n    # ── Step 1: GET current App Gateway configuration ─────────────────────────\n    echo \"  Fetching current App Gateway configuration...\"\n    if ! az rest --method GET --uri \"${GATEWAY_URL}\" --output json > \"${GATEWAY_FILE}\" 2>&1; then\n        echo \"  GET failed.\"\n        if [ \"${attempt}\" -lt \"${MAX_RETRIES}\" ]; then\n            echo \"  Waiting ${RETRY_DELAY}s before retry...\"\n            sleep \"${RETRY_DELAY}\"\n        fi\n        continue\n    fi\n\n    ETAG=$(jq -r '.etag' \"${GATEWAY_FILE}\")\n    echo \"  ETag: ${ETAG}\"\n\n    # ── Step 2: Apply mutations via jq ────────────────────────────────────────\n    #   a) Update the target backend pool servers to the new private FQDN.\n    #   b) Strip any customErrorConfigurations with invalid HTTP status codes.\n    #      Azure only accepts HttpStatus403 and HttpStatus502 in this field.\n    #      Anything else (e.g. HttpStatus400) causes ARM to reject the entire PUT\n    #      with ApplicationGatewayCustomErrorStatusCodeIsInvalid. Stripping them\n    #      is safe: the existing configuration is already broken and cannot be\n    #      served by Azure regardless.\n    # Extract gateway ID for constructing sub-resource references\n    GW_ID=$(jq -r '.id' \"${GATEWAY_FILE}\")\n    PROBE_NAME=\"${POOL_NAME}-HTTPS-pr\"\n\n    # Check what exists\n    POOL_EXISTS=$(jq --arg n \"${POOL_NAME}\" \\\n        '[.properties.backendAddressPools[] | select(.name == $n)] | length' \\\n        \"${GATEWAY_FILE}\")\n\n    if [ \"${POOL_EXISTS}\" -eq 0 ]; then\n        echo \"  Backend pool '${POOL_NAME}' does not exist — creating...\"\n    else\n        echo \"  Backend pool '${POOL_NAME}' exists — updating FQDN...\"\n    fi\n\n    if [ \"${ENABLE_FULL_CONFIG}\" = \"true\" ]; then\n        echo \"  Patching configuration (upsert pool + probe + settings + listener + rule)...\"\n    else\n        echo \"  Patching configuration (upsert pool only)...\"\n    fi\n\n    if ! jq \\\n        --arg pool \"${POOL_NAME}\" \\\n        --arg fqdn \"${PRIVATE_FQDN}\" \\\n        --arg http_settings \"${HTTP_SETTINGS_NAME:-}\" \\\n        --arg listener \"${LISTENER_NAME:-}\" \\\n        --arg rule \"${RULE_NAME:-}\" \\\n        --arg ssl_cert_name \"${SSL_CERT_NAME:-}\" \\\n        --arg hostname \"${HOSTNAME:-}\" \\\n        --arg probe_name \"${PROBE_NAME}\" \\\n        --arg gw_id \"${GW_ID}\" \\\n        '\n        # Helper: construct a sub-resource ID\n        def sub_id(collection; item_name):\n            \"\\($gw_id)/\\(collection)/\\(item_name)\";\n\n        # ── Upsert helper ─────────────────────────────────────────────\n        def upsert(arr; $name; new_entry):\n            if (arr | map(select(.name == $name)) | length) > 0 then\n                arr | map(if .name == $name then new_entry else . end)\n            else\n                arr + [new_entry]\n            end;\n\n        # ── 1. Upsert backend pool ────────────────────────────────────\n        .properties.backendAddressPools = upsert(\n            .properties.backendAddressPools; $pool;\n            {\n                \"name\": $pool,\n                \"properties\": {\n                    \"backendAddresses\": [{\"fqdn\": $fqdn}]\n                }\n            }\n        ) |\n\n        # ── 2. Upsert health probe (only if full config) ─────────────\n        (if $http_settings != \"\" then\n            .properties.probes = upsert(\n                (.properties.probes // []); $probe_name;\n                {\n                    \"name\": $probe_name,\n                    \"properties\": {\n                        \"protocol\": \"Https\",\n                        \"path\": \"/health\",\n                        \"interval\": 30,\n                        \"timeout\": 30,\n                        \"unhealthyThreshold\": 3,\n                        \"pickHostNameFromBackendHttpSettings\": true,\n                        \"minServers\": 0,\n                        \"match\": {}\n                    }\n                }\n            )\n        else . end) |\n\n        # ── 3. Upsert HTTP settings (only if full config) ────────────\n        (if $http_settings != \"\" then\n            .properties.backendHttpSettingsCollection = upsert(\n                .properties.backendHttpSettingsCollection; $http_settings;\n                {\n                    \"name\": $http_settings,\n                    \"properties\": {\n                        \"port\": 443,\n                        \"protocol\": \"Https\",\n                        \"cookieBasedAffinity\": \"Disabled\",\n                        \"pickHostNameFromBackendAddress\": true,\n                        \"requestTimeout\": 30,\n                        \"probe\": {\"id\": sub_id(\"probes\"; $probe_name)}\n                    }\n                }\n            )\n        else . end) |\n\n        # ── 4. Upsert HTTPS listener (only if full config) ───────────\n        (if $listener != \"\" then\n            # Resolve existing IDs from the live config\n            (.properties.sslCertificates // [] | map(select(.name == $ssl_cert_name)) | first | .id) as $ssl_cert_id |\n            (.properties.frontendIPConfigurations // [] | map(select(.properties.publicIPAddress != null)) | first | .id) as $frontend_ip_id |\n            (.properties.frontendPorts // [] | map(select(.properties.port == 443)) | first | .id) as $https_port_id |\n\n            .properties.httpListeners = upsert(\n                .properties.httpListeners; $listener;\n                {\n                    \"name\": $listener,\n                    \"properties\": {\n                        \"frontendIPConfiguration\": {\"id\": $frontend_ip_id},\n                        \"frontendPort\": {\"id\": $https_port_id},\n                        \"protocol\": \"Https\",\n                        \"hostName\": $hostname,\n                        \"requireServerNameIndication\": true,\n                        \"sslCertificate\": {\"id\": $ssl_cert_id},\n                        \"customErrorConfigurations\": []\n                    }\n                }\n            )\n        else . end) |\n\n        # ── 5. Upsert routing rule (only if full config) ─────────────\n        (if $rule != \"\" then\n            # Preserve existing priority or compute next available\n            (.properties.requestRoutingRules | map(select(.name == $rule)) | first | .properties.priority // null) as $existing_priority |\n            (if $existing_priority != null then $existing_priority\n             else ((.properties.requestRoutingRules | map(.properties.priority // 0) | map(select(. < 10000)) | max) + 10) // 100\n             end) as $priority |\n\n            .properties.requestRoutingRules = upsert(\n                .properties.requestRoutingRules; $rule;\n                {\n                    \"name\": $rule,\n                    \"properties\": {\n                        \"ruleType\": \"Basic\",\n                        \"priority\": $priority,\n                        \"httpListener\": {\"id\": sub_id(\"httpListeners\"; $listener)},\n                        \"backendAddressPool\": {\"id\": sub_id(\"backendAddressPools\"; $pool)},\n                        \"backendHttpSettings\": {\"id\": sub_id(\"backendHttpSettingsCollection\"; $http_settings)}\n                    }\n                }\n            )\n        else . end) |\n\n        # ── 6. Strip invalid custom error configs from ALL listeners ──\n        .properties.httpListeners = (.properties.httpListeners | map(\n            .properties.customErrorConfigurations = (\n                (.properties.customErrorConfigurations // []) |\n                map(select(.statusCode == \"HttpStatus403\" or .statusCode == \"HttpStatus502\"))\n            )\n        ))\n        ' \"${GATEWAY_FILE}\" > \"${MODIFIED_FILE}\"; then\n        echo \"ERROR: jq transformation failed — this is a script bug, not a transient error.\"\n        exit 1\n    fi\n\n    # Verify the pool is in the modified config\n    POOL_COUNT=$(jq --arg pool \"${POOL_NAME}\" \\\n        '[.properties.backendAddressPools[] | select(.name == $pool)] | length' \\\n        \"${MODIFIED_FILE}\")\n    if [ \"${POOL_COUNT}\" -eq 0 ]; then\n        echo \"ERROR: Backend pool '${POOL_NAME}' missing after jq transform — this is a script bug.\"\n        exit 1\n    fi\n\n    if [ \"${ENABLE_FULL_CONFIG}\" = \"true\" ]; then\n        # Verify all 4 additional resources exist\n        for check_name_var in HTTP_SETTINGS_NAME LISTENER_NAME RULE_NAME; do\n            check_name=\"${!check_name_var}\"\n            case \"${check_name_var}\" in\n                HTTP_SETTINGS_NAME) collection=\"backendHttpSettingsCollection\" ;;\n                LISTENER_NAME)      collection=\"httpListeners\" ;;\n                RULE_NAME)          collection=\"requestRoutingRules\" ;;\n            esac\n            count=$(jq --arg n \"${check_name}\" \\\n                \"[.properties.${collection}[] | select(.name == \\$n)] | length\" \\\n                \"${MODIFIED_FILE}\")\n            if [ \"${count}\" -eq 0 ]; then\n                echo \"ERROR: ${check_name_var}='${check_name}' missing in ${collection} after jq transform.\"\n                exit 1\n            fi\n        done\n        echo \"  All 5 sub-resources verified in modified config.\"\n    fi\n\n    # Log any stripped entries so the team knows what was removed\n    STRIPPED=$(jq --raw-output '\n        .properties.httpListeners[] |\n        .name as $ln |\n        .properties.customErrorConfigurations // [] |\n        map(select(.statusCode != \"HttpStatus403\" and .statusCode != \"HttpStatus502\")) |\n        select(length > 0) |\n        \"  [stripped] listener=\\($ln) statusCodes=\\(map(.statusCode) | join(\",\"))\"\n    ' \"${GATEWAY_FILE}\" 2>/dev/null || true)\n    if [ -n \"${STRIPPED}\" ]; then\n        echo \"  NOTE: Stripped invalid customErrorConfigurations (only 403/502 are valid):\"\n        echo \"${STRIPPED}\"\n    fi\n\n    # ── Step 3: PUT the modified configuration ────────────────────────────────\n    echo \"  Applying updated configuration...\"\n    if ! az rest \\\n        --method PUT \\\n        --uri \"${GATEWAY_URL}\" \\\n        --headers \"Content-Type=application/json\" \"If-Match=${ETAG}\" \\\n        --body \"@${MODIFIED_FILE}\" \\\n        --output none 2>&1; then\n        echo \"  PUT failed.\"\n        if [ \"${attempt}\" -lt \"${MAX_RETRIES}\" ]; then\n            echo \"  Waiting ${RETRY_DELAY}s for RBAC propagation before retry...\"\n            sleep \"${RETRY_DELAY}\"\n        fi\n        continue\n    fi\n\n    # ── Step 4: Poll until provisioning completes ─────────────────────────────\n    # App Gateway PUT is asynchronous — the resource enters \"Updating\" state and\n    # must be polled until provisioningState == \"Succeeded\".\n    echo \"  Waiting for App Gateway to finish provisioning...\"\n    for poll_attempt in $(seq 1 \"${MAX_POLL}\"); do\n        sleep \"${POLL_INTERVAL}\"\n        PROV_STATE=$(az rest \\\n            --method GET \\\n            --uri \"${GATEWAY_URL}\" \\\n            --query \"properties.provisioningState\" \\\n            -o tsv 2>/dev/null || echo \"Unknown\")\n        echo \"  provisioningState: ${PROV_STATE} (poll ${poll_attempt}/${MAX_POLL})\"\n        case \"${PROV_STATE}\" in\n            Succeeded)\n                if [ \"${ENABLE_FULL_CONFIG}\" = \"true\" ]; then\n                    echo \"=== App Gateway fully configured (pool + probe + settings + listener + rule) ===\"\n                else\n                    echo \"=== Backend pool updated successfully ===\"\n                fi\n                exit 0\n                ;;\n            Failed|Canceled)\n                echo \"ERROR: App Gateway update ended in state '${PROV_STATE}'.\"\n                exit 1\n                ;;\n        esac\n    done\n    echo \"  WARNING: Timed out waiting for provisioning to complete. Retrying from GET...\"\ndone\n\necho \"ERROR: Failed to update backend pool after ${MAX_RETRIES} attempts.\"\necho \"       If the last error was LinkedAuthorizationFailed, RBAC may still be propagating.\"\necho \"       Re-run azd provision in a few minutes to retry.\"\nexit 1\n"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deploymentScripts",
+      "apiVersion": "2023-08-01",
+      "name": "update-appgw-backend-pool",
+      "location": "[parameters('location')]",
+      "kind": "AzureCLI",
+      "tags": "[parameters('tags')]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', parameters('uamiId'))]": {}
+        }
+      },
+      "properties": {
+        "azCliVersion": "2.60.0",
+        "timeout": "PT10M",
+        "retentionInterval": "PT1H",
+        "cleanupPreference": "Always",
+        "forceUpdateTag": "[parameters('forceUpdateTag')]",
+        "environmentVariables": [
+          {
+            "name": "APPGW_RG",
+            "value": "[parameters('appGatewayResourceGroup')]"
+          },
+          {
+            "name": "APPGW_NAME",
+            "value": "[parameters('appGatewayName')]"
+          },
+          {
+            "name": "POOL_NAME",
+            "value": "[parameters('appGatewayBackendPoolName')]"
+          },
+          {
+            "name": "PRIVATE_FQDN",
+            "value": "[parameters('containerAppPrivateFqdn')]"
+          },
+          {
+            "name": "HTTP_SETTINGS_NAME",
+            "value": "[parameters('appGatewayHttpSettingsName')]"
+          },
+          {
+            "name": "LISTENER_NAME",
+            "value": "[parameters('appGatewayListenerName')]"
+          },
+          {
+            "name": "RULE_NAME",
+            "value": "[parameters('appGatewayRuleName')]"
+          },
+          {
+            "name": "SSL_CERT_NAME",
+            "value": "[parameters('appGatewaySslCertName')]"
+          },
+          {
+            "name": "HOSTNAME",
+            "value": "[parameters('appGatewayHostname')]"
+          }
+        ],
+        "scriptContent": "[variables('$fxv#0')]"
+      }
+    }
+  ]
+}

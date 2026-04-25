@@ -1,0 +1,107 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.42.1.51946",
+      "templateHash": "8641039045775591982"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for the UAMI"
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {},
+      "metadata": {
+        "description": "Tags to apply to created resources"
+      }
+    },
+    "containerAppName": {
+      "type": "string",
+      "metadata": {
+        "description": "Container App name — used to name the UAMI"
+      }
+    },
+    "managedEnvironmentDefaultDomain": {
+      "type": "string",
+      "metadata": {
+        "description": "Default domain of the Container Apps managed environment — used as the private DNS zone name (e.g., \"agreeablepebble-2234ef59.southeastasia.azurecontainerapps.io\")."
+      }
+    },
+    "managedEnvironmentStaticIp": {
+      "type": "string",
+      "metadata": {
+        "description": "Static IP of the Container Apps managed environment internal load balancer (e.g., \"10.164.0.16\"). Used as the wildcard A record target."
+      }
+    },
+    "appGatewayVnetId": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource ID of the App Gateway VNet (DEVUAT-APP-VNET) to link the private DNS zone to"
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[format('{0}-appgw-uami', parameters('containerAppName'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones",
+      "apiVersion": "2020-06-01",
+      "name": "[parameters('managedEnvironmentDefaultDomain')]",
+      "location": "global"
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones/A",
+      "apiVersion": "2020-06-01",
+      "name": "[format('{0}/{1}', parameters('managedEnvironmentDefaultDomain'), '*')]",
+      "properties": {
+        "ttl": 3600,
+        "aRecords": [
+          {
+            "ipv4Address": "[parameters('managedEnvironmentStaticIp')]"
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/privateDnsZones', parameters('managedEnvironmentDefaultDomain'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+      "apiVersion": "2020-06-01",
+      "name": "[format('{0}/{1}', parameters('managedEnvironmentDefaultDomain'), 'link-to-appgw-vnet')]",
+      "location": "global",
+      "properties": {
+        "virtualNetwork": {
+          "id": "[parameters('appGatewayVnetId')]"
+        },
+        "registrationEnabled": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/privateDnsZones', parameters('managedEnvironmentDefaultDomain'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "uamiId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-appgw-uami', parameters('containerAppName')))]"
+    },
+    "uamiPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-appgw-uami', parameters('containerAppName'))), '2023-01-31').principalId]"
+    }
+  }
+}

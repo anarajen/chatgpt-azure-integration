@@ -1,0 +1,89 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.42.1.51946",
+      "templateHash": "9071562288700455240"
+    }
+  },
+  "parameters": {
+    "appGatewayName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the existing Application Gateway (e.g., \"DEVUAT-ASE-APPGWV2-03\")"
+      }
+    },
+    "uamiPrincipalId": {
+      "type": "string",
+      "metadata": {
+        "description": "Principal ID of the UAMI created by appgw-integration.bicep"
+      }
+    },
+    "appGatewayExistingUamiName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of an existing User-Assigned Managed Identity already attached to the App Gateway (e.g., \"KP_NonProd_AppGw_KV_MI\"). When set, grants our UAMI Managed Identity Operator on it so that the full GET+PUT passes the linked authorization check. Leave empty if the App Gateway has no attached UAMIs."
+      }
+    },
+    "appGatewayVnetName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of the VNet containing the App Gateway (e.g., \"DEVUAT-APP-VNET\"). Required when appGatewaySubnetName is set."
+      }
+    },
+    "appGatewaySubnetName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of the subnet the App Gateway is attached to (e.g., \"DEVUAT-APPGWV2-SUBNET\"). When set, grants our UAMI Network Contributor on it — required because the App Gateway PUT body references this subnet, triggering a join/action check. Leave empty if not needed."
+      }
+    }
+  },
+  "variables": {
+    "networkContributorRoleId": "4d97b98b-1d4f-4787-a291-c67834d212e7",
+    "managedIdentityOperatorRoleId": "f1a07417-d97a-45cb-824c-7a7467783830",
+    "enableManagedIdentityOperator": "[not(empty(parameters('appGatewayExistingUamiName')))]",
+    "enableSubnetNetworkContributor": "[and(not(empty(parameters('appGatewayVnetName'))), not(empty(parameters('appGatewaySubnetName'))))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Network/applicationGateways', parameters('appGatewayName'))]",
+      "name": "[guid(resourceId('Microsoft.Network/applicationGateways', parameters('appGatewayName')), parameters('uamiPrincipalId'), variables('networkContributorRoleId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('networkContributorRoleId'))]",
+        "principalId": "[parameters('uamiPrincipalId')]",
+        "principalType": "ServicePrincipal"
+      }
+    },
+    {
+      "condition": "[variables('enableManagedIdentityOperator')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', if(variables('enableManagedIdentityOperator'), parameters('appGatewayExistingUamiName'), 'placeholder'))]",
+      "name": "[guid(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', if(variables('enableManagedIdentityOperator'), parameters('appGatewayExistingUamiName'), 'placeholder')), parameters('uamiPrincipalId'), variables('managedIdentityOperatorRoleId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('managedIdentityOperatorRoleId'))]",
+        "principalId": "[parameters('uamiPrincipalId')]",
+        "principalType": "ServicePrincipal"
+      }
+    },
+    {
+      "condition": "[variables('enableSubnetNetworkContributor')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Network/virtualNetworks/subnets', if(variables('enableSubnetNetworkContributor'), parameters('appGatewayVnetName'), 'placeholder'), if(variables('enableSubnetNetworkContributor'), parameters('appGatewaySubnetName'), 'placeholder'))]",
+      "name": "[guid(resourceId('Microsoft.Network/virtualNetworks/subnets', if(variables('enableSubnetNetworkContributor'), parameters('appGatewayVnetName'), 'placeholder'), if(variables('enableSubnetNetworkContributor'), parameters('appGatewaySubnetName'), 'placeholder')), parameters('uamiPrincipalId'), variables('networkContributorRoleId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('networkContributorRoleId'))]",
+        "principalId": "[parameters('uamiPrincipalId')]",
+        "principalType": "ServicePrincipal"
+      }
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "environmentName": {
+            "value": "${AZURE_ENV_NAME}"
+        },
+        "location": {
+            "value": "${AZURE_LOCATION}"
+        },
+        "resourceGroupName": {
+            "value": "${RESOURCE_GROUP_NAME}"
+        },
+        "sharedResourceGroupName": {
+            "value": "${SHARED_RESOURCE_GROUP_NAME}"
+        },
+        "sharedLocation": {
+            "value": "${SHARED_LOCATION=${AZURE_LOCATION}}"
+        },
+        "sharedContainerRegistryName": {
+            "value": "${SHARED_CONTAINER_REGISTRY_NAME}"
+        },
+        "sharedContainerRegistryExists": {
+            "value": "${SHARED_CONTAINER_REGISTRY_EXISTS=false}"
+        },
+        "containerAppEnvironmentName": {
+            "value": "${CONTAINER_APP_ENVIRONMENT_NAME}"
+        },
+        "containerAppEnvironmentExists": {
+            "value": "${CONTAINER_APP_ENVIRONMENT_EXISTS=false}"
+        },
+        "containerAppEnvironmentResourceGroupName": {
+            "value": "${CONTAINER_APP_ENVIRONMENT_RESOURCE_GROUP_NAME=}"
+        },
+        "containerAppName": {
+            "value": "${CONTAINER_APP_NAME}"
+        },
+        "logAnalyticsWorkspaceResourceGroupName": {
+            "value": "${LOG_WORKSPACE_RG}"
+        },
+        "logAnalyticsWorkspaceName": {
+            "value": "${LOG_WORKSPACE_NAME}"
+        },
+        "azureSearchEndpoint": {
+            "value": "${AZURE_SEARCH_ENDPOINT}"
+        },
+        "azureSearchServiceName": {
+            "value": "${AZURE_SEARCH_SERVICE_NAME=}"
+        },
+        "azureSearchServiceResourceGroupName": {
+            "value": "${AZURE_SEARCH_RESOURCE_GROUP=}"
+        },
+        "azureSearchDealsIndex": {
+            "value": "${AZURE_SEARCH_DEALS_INDEX}"
+        },
+        "azureSearchMerchantIndex": {
+            "value": "${AZURE_SEARCH_MERCHANT_INDEX}"
+        },
+        "azureSearchPrivilegeIndex": {
+            "value": "${AZURE_SEARCH_PRIVILEGE_INDEX}"
+        },
+        "staticApiUrl": {
+            "value": "${STATIC_API_URL=}"
+        },
+        "widgetDomain": {
+            "value": "${WIDGET_DOMAIN}"
+        },
+        "viteKrisplusUniversalLink": {
+            "value": "${VITE_KRISPLUS_UNIVERSAL_LINK}"
+        },
+        "widgetCspResourceDomains": {
+            "value": "${WIDGET_CSP_RESOURCE_DOMAINS}"
+        },
+        "widgetCspConnectDomains": {
+            "value": "${WIDGET_CSP_CONNECT_DOMAINS=}"
+        },
+        "nodeEnv": {
+            "value": "${NODE_ENV=production}"
+        },
+        "minReplicas": {
+            "value": "${CONTAINER_MIN_REPLICAS=0}"
+        },
+        "maxReplicas": {
+            "value": "${CONTAINER_MAX_REPLICAS=2}"
+        },
+        "cpu": {
+            "value": "${CONTAINER_CPU=0.5}"
+        },
+        "memory": {
+            "value": "${CONTAINER_MEMORY=1.0Gi}"
+        },
+        "containerPort": {
+            "value": "${CONTAINER_PORT=3000}"
+        },
+        "infrastructureSubnetId": {
+            "value": "${INFRASTRUCTURE_SUBNET_ID=}"
+        },
+        "containerAppSubnetName": {
+            "value": "${CONTAINER_APP_SUBNET_NAME=}"
+        },
+        "containerAppSubnetAddressPrefix": {
+            "value": "${CONTAINER_APP_SUBNET_ADDRESS_PREFIX=}"
+        },
+        "appGatewayVnetName": {
+            "value": "${APP_GATEWAY_VNET_NAME=}"
+        },
+        "appGatewayVnetResourceGroupName": {
+            "value": "${APP_GATEWAY_VNET_RESOURCE_GROUP=}"
+        },
+        "appGatewayName": {
+            "value": "${APP_GATEWAY_NAME=}"
+        },
+        "appGatewayBackendPoolName": {
+            "value": "${APP_GATEWAY_BACKEND_POOL_NAME=}"
+        },
+        "appGatewayExistingUamiName": {
+            "value": "${APP_GATEWAY_EXISTING_UAMI_NAME=}"
+        },
+        "appGatewaySubnetName": {
+            "value": "${APP_GATEWAY_SUBNET_NAME=}"
+        },
+        "appGatewayHttpSettingsName": {
+            "value": "${APP_GATEWAY_HTTP_SETTINGS_NAME=}"
+        },
+        "appGatewayListenerName": {
+            "value": "${APP_GATEWAY_LISTENER_NAME=}"
+        },
+        "appGatewayRuleName": {
+            "value": "${APP_GATEWAY_RULE_NAME=}"
+        },
+        "appGatewaySslCertName": {
+            "value": "${APP_GATEWAY_SSL_CERT_NAME=}"
+        },
+        "appGatewayHostname": {
+            "value": "${APP_GATEWAY_HOSTNAME=}"
+        },
+        "minScoreThreshold": {
+            "value": "${MIN_SCORE_THRESHOLD=0.01}"
+        },
+        "corsAllowedOrigins": {
+            "value": "${CORS_ALLOWED_ORIGINS=}"
+        },
+        "workers": {
+            "value": "${WORKERS=}"
+        },
+        "krisplusApiBaseUrl": {
+            "value": "${KRISPLUS_API_BASE_URL=}"
+        },
+        "krisplusCountry": {
+            "value": "${KRISPLUS_COUNTRY=}"
+        }
+    }
+}

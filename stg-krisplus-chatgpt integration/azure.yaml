@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: openai-apps-poc
+metadata:
+    template: azd-init@1.20.3
+services:
+    krisplus-mcp:
+        project: .
+        host: containerapp
+        resourceGroup: ${RESOURCE_GROUP_NAME}
+        language: ts
+        dist: dist
+        docker:
+            path: Dockerfile
+        environments:
+            default:
+                runtime:
+                    ingress:
+                        external: true
+                        target_port: 3000
+                        transport: http
+        env:
+            # Azure Search Configuration
+            AZURE_SEARCH_ENDPOINT: ${AZURE_SEARCH_ENDPOINT}
+            AZURE_SEARCH_DEALS_INDEX: ${AZURE_SEARCH_DEALS_INDEX}
+            AZURE_SEARCH_MERCHANT_INDEX: ${AZURE_SEARCH_MERCHANT_INDEX}
+            AZURE_SEARCH_PRIVILEGE_INDEX: ${AZURE_SEARCH_PRIVILEGE_INDEX}
+            MIN_SCORE_THRESHOLD: ${MIN_SCORE_THRESHOLD=0.01}
+            # Application Insights (auto-injected from Bicep outputs)
+            # APPLICATIONINSIGHTS_CONNECTION_STRING is set by infrastructure
+            # Widget Configuration
+            VITE_KRISPLUS_UNIVERSAL_LINK: ${VITE_KRISPLUS_UNIVERSAL_LINK}
+            WIDGET_CSP_RESOURCE_DOMAINS: ${WIDGET_CSP_RESOURCE_DOMAINS}
+            WIDGET_CSP_CONNECT_DOMAINS: ${WIDGET_CSP_CONNECT_DOMAINS=}
+            # Category Service
+            STATIC_API_URL: ${STATIC_API_URL}
+            # Kris+ API Configuration (optional)
+            KRISPLUS_API_BASE_URL: ${KRISPLUS_API_BASE_URL=}
+            KRISPLUS_COUNTRY: ${KRISPLUS_COUNTRY=}
+            # Server Configuration
+            NODE_ENV: ${NODE_ENV}
+            WORKERS: ${WORKERS=}
+infra:
+    provider: bicep
+    path: infra

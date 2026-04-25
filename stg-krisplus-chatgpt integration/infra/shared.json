@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.42.1.51946",
+      "templateHash": "4814384929990269500"
+    }
+  },
+  "parameters": {
+    "sharedContainerRegistryName": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 50,
+      "metadata": {
+        "description": "Shared Azure Container Registry name"
+      }
+    },
+    "sharedTags": {
+      "type": "object",
+      "defaultValue": {},
+      "metadata": {
+        "description": "Tags applied to shared resources"
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ContainerRegistry/registries",
+      "apiVersion": "2023-01-01-preview",
+      "name": "[parameters('sharedContainerRegistryName')]",
+      "location": "[resourceGroup().location]",
+      "sku": {
+        "name": "Basic"
+      },
+      "properties": {
+        "adminUserEnabled": false,
+        "zoneRedundancy": "Disabled",
+        "publicNetworkAccess": "Enabled"
+      },
+      "tags": "[parameters('sharedTags')]"
+    }
+  ],
+  "outputs": {
+    "sharedContainerRegistryResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('sharedContainerRegistryName'))]"
+    },
+    "sharedContainerRegistryLoginServer": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('sharedContainerRegistryName')), '2023-01-01-preview').loginServer]"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.42.1.51946",
+      "templateHash": "4352743631233337666"
+    }
+  },
+  "parameters": {
+    "searchServiceName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Azure Cognitive Search service"
+      }
+    },
+    "containerAppPrincipalId": {
+      "type": "string",
+      "metadata": {
+        "description": "Principal ID of the Container App system-assigned managed identity"
+      }
+    }
+  },
+  "variables": {
+    "searchIndexDataReaderRoleId": "1407120a-92aa-4202-b7e9-c0e197c71c8f"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Search/searchServices', parameters('searchServiceName'))]",
+      "name": "[guid(resourceId('Microsoft.Search/searchServices', parameters('searchServiceName')), parameters('containerAppPrincipalId'), variables('searchIndexDataReaderRoleId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('searchIndexDataReaderRoleId'))]",
+        "principalId": "[parameters('containerAppPrincipalId')]",
+        "principalType": "ServicePrincipal"
+      }
+    }
+  ]
+}
